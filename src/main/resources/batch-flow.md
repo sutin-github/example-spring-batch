@@ -147,7 +147,7 @@ JpaJob --> JobOperator: Job 完了
 ```
 
 ## 4. CUSTOM_READER_JOB
-処理概要: 独自の ItemReader を使用し、DB の Book を読み込み、author を加工して保存するジョブ。
+処理概要: Blaze-Persistence を使って Book をページング取得し、author を加工したうえで、重複抑止付きの SQL でレコードを保存するジョブ。
 
 ```plantuml
 @startuml
@@ -162,36 +162,42 @@ participant JobOperator
 participant "CustomReaderJobConfig" as CustomJob
 participant "customReaderStep" as CustomStep
 participant "CustomItemReader" as Reader
-participant "BookRepository" as Repo
+participant "CriteriaBuilderFactory" as Criteria
+participant "EntityManager" as EM
 participant "ItemProcessor" as Processor
-participant "ItemWriter" as Writer
+participant "JdbcBatchItemWriter" as Writer
+participant "tbl_book" as Table
 
 rnote over CustomJob
-  役割: カスタムリーダーを使って Step を定義
+  役割: カスタム ItemReader と Step を定義
 endrnote
 rnote over Reader
-  役割: BookRepository から読み込んだデータを 1 件ずつ返す
+  役割: offset / maxResults で 1 ページずつ取得
+endrnote
+rnote over Criteria
+  役割: Blaze-Persistence の CriteriaBuilder を生成
 endrnote
 rnote over Processor
-  役割: author に接頭辞を付けて加工する
+  役割: author がすでに "Author. " 付きなら重複付与しない
 endrnote
 rnote over Writer
-  役割: 変換済み Book を保存する
+  役割: WHERE NOT EXISTS で重複 insert を抑止
 endrnote
 
 Scheduler -> JobOperator: start(customReaderJob, JobParameters)
 JobOperator -> CustomJob: customReaderJob()
 CustomJob -> CustomStep: start()
 CustomStep -> Reader: read()
-Reader -> Repo: findAll()
-Repo --> Reader: Book リスト
+Reader -> Criteria: create(entityManager, Book)
+Criteria -> EM: query.firstResult = offset
+EM --> Reader: Book page
 Reader --> CustomStep: Book
 CustomStep -> Processor: process(book)
-Processor -> Processor: author = "Author. " + author
+Processor -> Processor: author = if (startsWith("Author. ")) ... else "Author. $author"
 Processor --> CustomStep: 変換済み Book
 CustomStep -> Writer: writer(chunk)
-Writer -> Repo: saveAll(list)
-Repo --> Writer: 保存完了
+Writer -> Table: INSERT ... SELECT ... WHERE NOT EXISTS
+Table --> Writer: 追加/スキップ結果
 Writer --> CustomStep: 書き込み完了
 CustomStep --> CustomJob: Step 完了
 CustomJob --> JobOperator: Job 完了
@@ -202,4 +208,10 @@ CustomJob --> JobOperator: Job 完了
 - SIMPLE_JOB は Tasklet ベースのシンプルな実行フローです。
 - JSON_FILE_JOB は ClassPath の JSON を読み取る構成です。
 - JPA_PAGING_IR_JOB はページング読み取りでデータベースから Book を取得します。
-- CUSTOM_READER_JOB は独自の ItemReader と処理済みデータを DB に保存します。
+- CUSTOM_READER_JOB は Blaze-Persistence の CriteriaBuilder を使ってページング取得し、再実行時の重複を避ける実装です。
+
+## 依存関係と運用上の注意
+- Spring Boot 4.1.1 では Hibernate 7 系が使われるため、Blaze の Hibernate 7.1 向けモジュールを使用する。
+- PostgreSQL JDBC は 42.7.13 まで更新しており、脆弱性報告の対象となる 42.7.4 ではないことを確認している。
+- 依存の組み合わせは `hibernate-core 7.4.5.Final` と `blaze-persistence-integration-hibernate-7.1:1.6.20` が解決される構成を前提にしている。
+- `CUSTOM_READER_JOB` は再実行時の二重登録を避けるため、author の prefix 重複抑止と `WHERE NOT EXISTS` を併用している。
