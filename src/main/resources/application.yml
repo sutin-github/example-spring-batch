@@ -1,10 +1,9 @@
 # Kotlin Spring Batch サンプルのアプリケーション設定
 # - server.port: HTTP (例: actuator/health) のポート
 # - spring.batch.job.names: デフォルトで起動するジョブ名を制御します
-server:
-  port: 8082
-
 spring:
+  main:
+    web-application-type: none
   batch:
     job:
       names: ${job.name:NONE}   # ex)--job.name=jsonFileJob4 createDate=2020-10-11
@@ -12,18 +11,9 @@ spring:
       initialize-schema: always
   application:
     name: BATCH
-  datasource:
-    url: jdbc:postgresql://localhost:5432/book
-    driver-class-name: org.postgresql.Driver
-    username: postgres
-    password: postgres
-    hikari:
-      connection-timeout: 5000
-      maximum-pool-size: 10
   jpa:
     open-in-view: false
     generate-ddl: false
-    show-sql: true
     properties:
       hibernate:
         format_sql: false
