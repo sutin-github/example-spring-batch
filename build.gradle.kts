@@ -36,8 +36,8 @@ dependencies {
 	implementation("com.blazebit:blaze-persistence-core-impl-jakarta:1.6.20")
 	implementation("com.blazebit:blaze-persistence-integration-hibernate-7.1:1.6.20")
 
-	// PostgreSQL ドライバ
-	implementation("org.postgresql:postgresql:42.7.4")
+	// PostgreSQL ドライバ: 42.7.4 は CVE-2025-49146 の影響があり、修正版へ更新
+	implementation("org.postgresql:postgresql:42.7.13")
 
 	implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
 	implementation("org.jetbrains.kotlin:kotlin-reflect")

@@ -1,8 +1,8 @@
 package me.examplebatch.batch.item
 
 import com.blazebit.persistence.CriteriaBuilderFactory
-import me.examplebatch.batch.domain.Book
 import jakarta.persistence.EntityManager
+import me.examplebatch.batch.domain.Book
 import org.springframework.batch.infrastructure.item.ItemReader
 import org.springframework.beans.factory.annotation.Autowired
 
@@ -26,6 +26,13 @@ open class CustomItemReader(
     private var currentIndex: Int = 0
     private var offset: Int = 0
     private var initialized: Boolean = false
+
+    fun resetState() {
+        currentPage.clear()
+        currentIndex = 0
+        offset = 0
+        initialized = false
+    }
 
     private fun loadNextPage(): MutableList<Book> {
         val criteriaBuilder = criteriaBuilderFactory.create(entityManager, Book::class.java)
