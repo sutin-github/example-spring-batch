@@ -69,21 +69,35 @@ class CustomReaderJobConfig(
     @Bean
     fun processor(): ItemProcessor<Book, Book>{
         return ItemProcessor {
-            it.author = "Author. " + it.author
-            it
-        }
+           val author = it.author ?: "unknown"
+           it.author = if (author.startsWith("Author. ")) author else "Author. $author"
+           it
+       }
     }
 
     /**
      * JdbcBatchItemWriter に置き換えることで、chunk 単位で SQL バッチ書き込みを行う。
      * - JPA の persistence context を経由しないため、書き込みオーバーヘッドが小さくなる
      * - PostgreSQL では insert のバッチ処理が安定しやすく、本番向けの大量データ処理に適する
+     * - 重複実行時の二重 insert を抑制するため、同一キー候補に対して WHERE NOT EXISTS を付与する
      */
     @Bean
     fun writer(): ItemWriter<Book> {
        return JdbcBatchItemWriterBuilder<Book>()
            .dataSource(dataSource)
-           .sql("INSERT INTO tbl_book (name, author, bookstore_id) VALUES (:name, :author, :bookstoreId)")
+           .sql(
+               """
+               INSERT INTO tbl_book (name, author, bookstore_id)
+               SELECT :name, :author, :bookstoreId
+               WHERE NOT EXISTS (
+                   SELECT 1
+                   FROM tbl_book existing
+                   WHERE (existing.name = :name OR (existing.name IS NULL AND :name IS NULL))
+                     AND (existing.author = :author OR (existing.author IS NULL AND :author IS NULL))
+                     AND (existing.bookstore_id = :bookstoreId OR (existing.bookstore_id IS NULL AND :bookstoreId IS NULL))
+               )
+               """.trimIndent()
+           )
            .beanMapped()
            .build()
     }
