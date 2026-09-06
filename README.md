@@ -32,13 +32,14 @@ Chunk 処理や Tasklet、JSON 読み取り、JPA ページング、Blaze-Persis
 そのため `JpaPagingItemReader` と同様の考え方で大量データを安全に処理できます。
 
 実装上のポイント:
-- `@PostConstruct` に依存した早期初期化ではなく、`read()` の初回アクセス時に必要なページを読み込むようにしています。
-- これにより、Spring Batch の初期化タイミングとリーダー起動タイミングのズレを防ぎ、`EntityManager` が未準備の状態で参照されるケースを避けています。
+- `read()` の初回アクセス時に必要なページを読み込むようにしており、起動直後の `EntityManager` 未準備問題を避けています。
 - 1ページごとに `currentPage` を切り替えながら処理するので、大量データでもメモリ使用量を抑えられます。
+- `author` の prefix を重複付与しないようにし、writer 側で `WHERE NOT EXISTS` を使って重複 insert を防止しています。
 
 利点:
 - メモリ使用量を抑えられる
 - `findAll()` より DB 転送量を削減できる
+- 再実行時の重複登録を抑えやすい
 - 1ページ単位の処理で堅牢なバッチ実行が可能
 
 ---
@@ -169,29 +170,25 @@ java -jar --job.name=JPA_PAGING_IR_JOB createDate=2020-10-14 ./batch.jar
 - 処理概要:
   - Blaze-Persistence を使って `Book` をページング取得する
   - `CustomItemReader` を独自実装し、標準の `JpaPagingItemReader` と同様の設計に寄せる
-  - 取得したデータを加工して保存する
+  - 取得したデータを加工して、重複抑止付き SQL で保存する
 - ステップ構成:
   - `CUSTOM_READER_JOB_STEP`
   - `chunk<Book, Book>(10, transactionManager)`
   - リーダー: `CustomItemReader(pageSize = CHUNK_SIZE)`
-  - プロセッサ: `author` を `Author. ` 付きの形式に変換する
+  - プロセッサ: `author` が `Author. ` 付きでない場合のみ付与する
   - ライター: `JdbcBatchItemWriter` による chunk 単位のバッチ更新
 - 実際の流れ:
   1. `CustomItemReader` が `CriteriaBuilderFactory.create(...)` を使ってクエリを作成する
   2. `firstResult` と `maxResults` によりページ単位で取得する
   3. `read()` が次の item を返すたびに、現在ページ内の index を進める
   4. ページが終わると次のページをロードして続きを処理する
-  5. プロセッサが `author` を加工する
-  6. `JdbcBatchItemWriter` が `INSERT INTO tbl_book ...` で一括書き込みを行う
+  5. プロセッサが `author` を安全に加工する
+  6. `JdbcBatchItemWriter` が `INSERT ... WHERE NOT EXISTS` で重複 insert を防ぎながら一括書き込みを行う
 - 目的:
   - `JpaPagingItemReader` に近いページング設計を自前実装で再現する
   - Blaze-Persistence による柔軟なクエリ制御を学ぶ
   - 大量データの読み込みを効率化する例を提供する
-  - `saveAll()` のような単純な JPA 保存よりも、バッチ向けの SQL 書き込みを採用して本番運用に近い設計を示す
-- 目的:
-  - `JpaPagingItemReader` に近いページング設計を自前実装で再現する
-  - Blaze-Persistence による柔軟なクエリ制御を学ぶ
-  - 大量データの読み込みを効率化する例を提供する
+  - 再実行時でも `Author. ` の重複付与やレコード重複を抑えたバッチ処理を示す
 
 ### `SimpleTasklet` と `SimpleJobScheduler` の役割
 - `SimpleTasklet`: Job parameter を受け取り、ログ出力だけでなく将来的な処理の入口として使う
@@ -208,6 +205,7 @@ java -jar --job.name=JPA_PAGING_IR_JOB createDate=2020-10-14 ./batch.jar
 - ログ出力先は `logs/batch.log` を使うように設定しており、環境依存の `/User/logs` への書き込みを避けています
 - Spring Batch のメタデータテーブルは起動時に自動的に扱われる構成になっています
 - `CUSTOM_READER_JOB` は Blaze-Persistence の準備が必要で、JPA と Hibernate のバージョンに合わせた設定が前提です
+- 依存関係は Spring Boot 4.1.1 / Hibernate 7.4.5 / Blaze 1.6.20 / PostgreSQL JDBC 42.7.13 の組み合わせを前提としています
 
 ### 実行確認のポイント
 - `./gradlew compileKotlin` でソースの整合性を確認できます
